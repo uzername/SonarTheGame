@@ -1,0 +1,985 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<title>S o n a r</title>
+<style>
+.main {
+background: black;
+</style>
+<script type="text/javascript">
+// http://codetheory.in/weighted-biased-random-number-generation-with-javascript-based-on-probability/
+var rand = function(min, max) {
+    return Math.random() * (max - min) + min;
+};
+var getRandomItem = function(list, weight) {
+    var total_weight = weight.reduce(function (prev, cur, i, arr) {
+        return prev + cur;
+    });     
+    var random_num = rand(0, total_weight);
+    var weight_sum = 0;
+    //console.log(random_num)     
+    for (var i = 0; i < list.length; i++) {
+        weight_sum += weight[i];
+        weight_sum = +weight_sum.toFixed(2);
+         
+        if (random_num <= weight_sum) {
+            return list[i];
+        }
+    }     
+    // end of function
+};
+
+function GamefieldParameters(in_horSym, in_verSym, in_symSz) {
+   /**
+    * number of symbols: horizontal and vertical direction
+    */
+   this.horizontalFieldSz = in_horSym;
+   this.verticalFieldSz = in_verSym;
+   /**
+   * size of font in pixels
+   */
+   this.fontSz = in_symSz;
+   /**
+   * width of symbol displayed on canvas. Calculated in main_init, should not be changed by user
+   */
+   this.symbolWidth = 0;
+   /**
+   * here is stored canvas JS object
+   */
+   this.canvasItm = null;
+   this.canvasCtx = null;
+   
+}
+
+function GamefieldRenderer() {
+   this.allowedCharactersList = [ '~', '=' ];
+   this.allowedCharactersWeights = [ 0.75, 0.25 ];
+   /**
+   * colors used to render gamefield
+   */
+   this.allowedColors = [ 'rgb(0,153,255)', 'rgb(0,0,153)', 'rgb(0,0,255)' ];
+   this.allowedColorsWeights = [0.10,0.50,0.40];
+   /**
+   * color of waves left behind the boat
+   */
+   this.boatWaveColor = 'rgb(0,153,204)';
+   /**
+   * completely fill the gamefield
+   */
+   this.renderGamefieldComplete = function() {
+   //draw_character([5, 3, ',', 'rgb(0,0,255)', 'rgb(0,0,0)']);
+   for (var hor = 0; hor<instGamefield.horizontalFieldSz; hor++) {
+       for (var ver = 0; ver<instGamefield.verticalFieldSz; ver++) {
+	       draw_character([hor, ver, getRandomItem(instGamefieldRenderer.allowedCharactersList,instGamefieldRenderer.allowedCharactersWeights), getRandomItem(instGamefieldRenderer.allowedColors,instGamefieldRenderer.allowedColorsWeights), 'rgb(0,0,0)']);
+	   }
+   }
+   }
+   this.renderWaterOrSonarOrFoundTreasure = function(in_xcoordRender, in_ycoordRender) {
+        //check existence of sonar at given point
+		var foundSonarsAtPosition = instGameHandler.positionedSonars.filter(
+		function(item) {
+		    return ((item.xcoord == in_xcoordRender)&&(item.ycoord == in_ycoordRender));
+		}
+		);
+		//check found treasure at given point
+		//...
+		if (foundSonarsAtPosition.length>0) {
+		   if ((foundSonarsAtPosition[0].sonarValue<10)&&(foundSonarsAtPosition[0].sonarValue>0)) {
+		       draw_character([in_xcoordRender,in_ycoordRender, ""+foundSonarsAtPosition[0].sonarValue, 'rgb(255,255,255)','rgb(153,0,0)']);
+		   } else {
+		      if (foundSonarsAtPosition[0].sonarValue==0) {
+			     draw_character([in_xcoordRender,in_ycoordRender, "*", 'rgb(255,255,255)','rgb(153,0,0)']);
+			  } else {
+			      draw_character([in_xcoordRender,in_ycoordRender, 'O', 'rgb(255,255,255)','rgb(153,0,0)']);
+			  }
+		       
+		   }
+		   
+		} else {
+		    draw_character([in_xcoordRender,in_ycoordRender, getRandomItem(instGamefieldRenderer.allowedCharactersList,instGamefieldRenderer.allowedCharactersWeights), getRandomItem(instGamefieldRenderer.allowedColors,instGamefieldRenderer.allowedColorsWeights), 'rgb(0,0,0)']);
+		}
+		
+   }
+}
+//var instGamefield = new GamefieldParameters(80,25,15);
+var instGamefield = null;
+var gamefieldCache = [];
+var directionsStatic = [
+    {id:"NORTH", code:"1"},
+	{id:"NORTHEAST_N",code:"7"},
+	{id:"NORTHEAST",code:"6"},
+	{id:"NORTHEAST_E",code:"5"},
+	{id:"EAST", code:"4"},
+	{id:"SOUTHEAST_E",code:"E"},
+	{id:"SOUTHEAST",code:"F"},
+	{id:"SOUTHEAST_S",code:"G"},
+	{id:"SOUTH", code:"2"},
+	{id:"SOUTHWEST_S", code:"D"},
+	{id:"SOUTHWEST", code:"C"},
+	{id:"SOUTHWEST_W", code:"B"},
+	{id:"WEST", code:"3"},
+	{id:"NORTHWEST_W", code:"A"},
+	{id:"NORTHWEST",code:"9"},
+	{id:"NORTHWEST_N",code:"8"}
+];
+var gamefieldFontWeight = "bold";
+var gamefieldFontName = "monospace";
+//var instGamefieldRenderer = new GamefieldRenderer();
+var instGamefieldRenderer = null;
+//var instBoat = new Boat();
+var instBoat = null;
+
+var MAXTREASURES = 3;
+var MAXSONARS = 16;
+var instGameHandler = null;
+
+function TreasureData(in_x, in_y) {
+    this.xcoord = in_x;
+	this.ycoord = in_y;
+}
+
+function SonarData(in_x, in_y) {
+    this.xcoord = in_x;
+	this.ycoord = in_y;
+	this.sonarValue = null;
+}
+
+
+function GameHandler(in_numSonars, in_numTreasures) {
+  /**
+  * acceptable values indicating game state:
+  * "MAINGAME", "MAINGAME_HIDEMESSAGE", "SONARS_USED" /no more sonars/, "TREASURES_FOUND" /no more treasures/
+  */
+  this.currentGameState = "MAINGAME";
+        this.successMessage = "You have found all the sunken treasure chests! Congratulations and good game!";
+	    this.missedTreasuresMessage = "We've run out of sonar devices! Now we have to turn the ship around <br/> and head for home with treasure chests still out there! Game over.";
+		this.restartMessage = "PRESS [Y] TO RESTART";
+		
+//number of remaining available sonars
+  this.numAvailableSonars = in_numSonars;
+//position of treasures. According to Invent with Python book, the item from array should be removed once the treasure has been found
+  this.positionedTreasures = [];
+  //position here treasures. It's OK to have several treasures in the same square
+  for (var i=1; i<=MAXTREASURES; i++) {
+    var generatedTreasure = new TreasureData(Math.floor(rand(0,instGamefield.horizontalFieldSz)), Math.floor(rand(0,instGamefield.verticalFieldSz)));
+	this.positionedTreasures.push(generatedTreasure);
+  }
+  //=======================
+//array of SonarData items  
+  this.positionedSonars = [];
+  this.updateSonarValue = function(in_sonarData) {
+        //calculate distance to treasure
+		//it is assumed that Treasure array has been filled by the moment
+		var out_sonarData = in_sonarData;
+        var smallestDistance = -1;
+		this.positionedTreasures.forEach(function(item,i,arr) {
+		    var distance;
+		    if (Math.abs(item.xcoord-out_sonarData.xcoord)>Math.abs(item.ycoord-out_sonarData.ycoord)) {
+			    distance = Math.abs(item.xcoord-out_sonarData.xcoord);
+			} else {
+			    distance = Math.abs(item.ycoord-out_sonarData.ycoord);
+			}
+		    if ( (distance<smallestDistance)||(smallestDistance == -1) ) {
+			    smallestDistance = distance;
+			}
+		});
+		out_sonarData.sonarValue = smallestDistance;
+        return out_sonarData;
+  }
+  /**
+  * A treasure was found. recalculate all sonars, except those indicating a treasure
+  */
+  this.updateSonarsChestFound = function(in_SonarData) {
+  var indexesToRemoveFromChest = this.positionedTreasures.map(function(item,i){
+        if ( (item.xcoord == in_SonarData.xcoord) && (item.ycoord == in_SonarData.ycoord) ) {
+		return i;
+		} else {  return null;  }
+  }).filter(function(item){return item!=null;});
+  this.positionedTreasures.splice(indexesToRemoveFromChest[0],1);
+  for (var j=0; j<this.positionedSonars.length; j++) {
+     if (this.positionedSonars[j].sonarValue>0) {
+	    this.positionedSonars[j]=this.updateSonarValue(this.positionedSonars[j]);
+		instGamefieldRenderer.renderWaterOrSonarOrFoundTreasure(this.positionedSonars[j].xcoord,this.positionedSonars[j].ycoord);
+	 }
+  }
+  
+  }
+  
+  this.placeSonar = function(in_sonarX, in_sonarY) {
+        var itmSonarData = new SonarData(in_sonarX, in_sonarY);
+		itmSonarData = this.updateSonarValue(itmSonarData);		
+        this.positionedSonars.push(itmSonarData);
+		document.getElementById("infodiv_totalsonars").innerHTML=instGameHandler.numAvailableSonars;
+        if (itmSonarData.sonarValue == 0) {
+		    //sunken treasure chest found
+			document.getElementById("infodiv_secondline").innerHTML="You have found a sunken treasure chest!";
+			instGameHandler.currentGameState ="MAINGAME_HIDEMESSAGE";
+			//recalculate and repaint all of the sonars
+			this.updateSonarsChestFound(itmSonarData);
+		} else {
+		    if ((itmSonarData.sonarValue>0)&&(itmSonarData.sonarValue<=9)) {
+			document.getElementById("infodiv_secondline").innerHTML="Treasure detected at a distance of" +itmSonarData.sonarValue+" from the sonar device.";
+			} else {
+			document.getElementById("infodiv_secondline").innerHTML="Sonar did not detect anything. All treasure chests out of range.";
+			}
+			instGameHandler.currentGameState ="MAINGAME_HIDEMESSAGE";
+		}
+		if (instGameHandler.numAvailableSonars>1) {
+		    document.getElementById("infodiv_neatplural").innerHTML = "s";
+		} else {
+		    document.getElementById("infodiv_neatplural").innerHTML = " ";
+		}
+
+		//console.log(itmSonarData);
+  }
+}
+/**
+* draw character using cache. Inspired by rot.js
+*/
+function draw_character(data) {
+    var x = data[0];
+    var y = data[1];
+    var ch = data[2]; //character
+    var fg = data[3]; //foreground color
+    var bg = data[4]; //background color
+    var hash = ""+ch+fg+bg;
+	if ((x<0)||(x>instGamefield.horizontalFieldSz)||(y<0)||(y>instGamefield.verticalFieldSz)) {return;}
+	if (hash in gamefieldCache) {
+	    var canvasInternal = gamefieldCache[hash];
+	} else {
+	    //console.log('rendering character to canvas');
+		//console.log(data);
+	    var canvasInternal = document.createElement("canvas");
+        var ctxInternal = canvasInternal.getContext("2d");
+		canvasInternal.width = instGamefield.symbolWidth;
+        canvasInternal.height = instGamefield.fontSz+1;
+		ctxInternal.fillStyle = bg/*'rgb(100,100,100)'*/;
+        ctxInternal.fillRect(0, 0, instGamefield.symbolWidth, canvasInternal.height);
+		ctxInternal.fillStyle = fg;/*'rgb(80,0,0)'*/;
+        ctxInternal.font = ""+gamefieldFontWeight+" "+instGamefield.fontSz+"px "+gamefieldFontName;
+        ctxInternal.textAlign = "center";
+        ctxInternal.textBaseline = "middle";
+		        
+		ctxInternal.fillText(ch, instGamefield.symbolWidth/2, Math.ceil(instGamefield.fontSz/2));
+		
+		gamefieldCache[hash] = canvasInternal;
+	}
+	//console.log(gamefieldCache);
+	instGamefield.canvasCtx.drawImage(canvasInternal, x*instGamefield.symbolWidth, y*instGamefield.fontSz);
+}
+function Boat() {
+
+this.boatCoordOnScreenX = 15;
+this.boatCoordOnScreenY = 5;
+
+this.boatCoordOnGamefieldX = 5;
+this.boatCoordOnGamefieldY = 5;
+this.currentBoatFacing = 4;
+this.boatId = 1; //index of item in bigBoatRenderStructure (+1 do not forget)
+
+var bigBoatRenderStructure = [{
+   "NORTH":{driverX_rel:2, driverY_rel:1, 
+       boat_data: [
+	   ['~','.','^','.','~',],
+	   ['~','|','@','|','~',],
+	   ['~','+','#','+','~',],
+	   ]
+   },
+   "NORTHEAST_N":{driverX_rel:2, driverY_rel:1,
+       boat_data: [
+	   ['~','~','.','^','.',],
+	   ['~','/','@','/','~',],
+	   ['~','+','#','+','~',]
+	   ]
+   },
+   "NORTHEAST":{driverX_rel:2, driverY_rel:2,
+       boat_data: [
+	   ['~','~','~','~','~',],
+	   ['~','~','.','^','.',],
+	   ['~','/','@','/','~',],
+	   ['+','#','+','~','~',]
+	   ]
+   },
+   "NORTHEAST_E":{driverX_rel:2, driverY_rel:2,
+       boat_data: [
+	   ['~','~','~','.','~',],
+	   ['~','+','/','>','~',],
+	   ['~','#','@','.','~',],
+	   ['~','+','/','~','~',],
+	   ]
+   },
+   "EAST":{driverX_rel:2, driverY_rel:2,
+       boat_data: [
+	   ['~','~','~','~','~',],
+	   ['~','+','-','.','~',],
+	   ['~','#','@','>','~',],
+	   ['~','+','-','.','~',],
+	   ['~','~','~','~','~',]
+	   ]
+   },
+    
+   "SOUTHEAST_E":{driverX_rel:2, driverY_rel:1,
+       boat_data: [
+	   ['~','+','\\','~','~',],
+	   ['~','#','@','.','~',],
+	   ['~','+','\\','>','~',],
+	   ['~','~','~','.','~',],
+	   ]
+   },
+   "SOUTHEAST":{driverX_rel:2, driverY_rel:1,
+       boat_data: [
+	   ['+','#','+','~','~',],
+	   ['~','\\','@','\\','~',],
+	   ['~','~','.','v','.',],
+	   ['~','~','~','~','~']
+	   ]
+   },
+   "SOUTHEAST_S":{driverX_rel:2, driverY_rel:1,
+       boat_data:[
+	   ['~','+','#','+','~',],
+	   ['~','\\','@','\\','~',],
+	   ['~','~','.','v','.',]
+	   ]
+   },
+   "SOUTH":{driverX_rel:2, driverY_rel:1,
+       boat_data:[
+       ['~','+','#','+','~',],
+       ['~','|','@','|','~',],
+	   ['~','.','v','.','~',],
+	   
+       ] 
+   },
+   
+   "SOUTHWEST_S":{driverX_rel:2, driverY_rel:1, //D
+       boat_data:[
+	   ['~','+','#','+','~'],
+	   ['~','/','@','/','~'],
+	   ['.','v','.','~','~']
+	   ]
+   },
+   "SOUTHWEST":{driverX_rel:2, driverY_rel:1, //C
+       boat_data:[
+	   ['~','~','+','#','+',],
+	   ['~','/','@','/','~',],
+	   ['.','v','.','~','~',],
+	   ['~','~','~','~','~',]
+	   ] },
+	"SOUTHWEST_W":{driverX_rel:2, driverY_rel:1,  //B
+	   boat_data:[
+	       ['~','~','/','+','~',],
+		   ['~','.','@','#','~',],
+		   ['~','<','/','+','~',],
+		   ['~','.','~','~','~',]
+	   ]
+	},
+	"WEST":{driverX_rel:2, driverY_rel:2,
+       boat_data:[
+	   ['~','~','~','~','~',],
+	   ['~','.','-','+','~',],
+	   ['~','<','@','#','~',],
+	   ['~','.','-','+','~',],
+	   ['~','~','~','~','~',],
+	   ]
+   },
+   "NORTHWEST_W":{driverX_rel:2, driverY_rel:2, //A
+       boat_data:[
+	   ['~','.','~','~','~',],
+	   ['~','<','\\','+','~',],
+	   ['~','.','@','#','~',],
+	   ['~','~','\\','+','~',]
+	   ]
+   },
+   "NORTHWEST":{driverX_rel:2, driverY_rel:2, //9
+       boat_data:[
+	   ['~','~','~','~','~',],
+	   ['.','^','.','~','~',],
+	   ['~','\\','@','\\','~',],
+	   ['~','~','+','#','+',]
+	   ]
+   },
+   "NORTHWEST_N":{driverX_rel:2, driverY_rel:1, //8
+       boat_data:[
+	   ['.','^','.','~','~',],
+	   ['~','\\','@','\\','~',],
+	   ['~','+','#','+','~',],
+	   ]
+   }
+  },];
+
+/**
+* render ascii-style boat with the given coordinates of driver. All the required data is stored in fields
+*/
+this.renderBoat2_ASCII = function (/*in_xcoordDriver, in_ycoordDriver, in_rotation*/) {
+//it may be refactored, I suppose. Check CDDA code, or get some inspiration from it how to render vehicles
+/*
+    1
+   8 7 
+  9   6   
+ A     5
+3       4
+ B     E
+  C   F
+   D G 
+    2
+N = 1 ; S = 2 ; W = 3 ; E = 4
+~.^.~  1 ~+-.~  4 ~+#+~ 2 ~.-+~  3 
+~|@|~  | ~#@>~  | ~|@|~ | ~<@#~  |  
+~+#+~  | ~+-.~  | ~.v.~ | ~.-+~  |
+
+~~.^. 6 .^.~~ 9 +#+~~  F ~~+#+ C
+~/@/~ | ~\@\~ | ~\@\~  | ~/@/~ | 
++#+~~ | ~~+#+ | ~~.v.  | .v.~~ |
+
+ ~~~.~ 5 ~.~~~  A  ~~/+~  B  ~+\~~  E
+ ~+/>~ | ~<\+~  |  ~.@#~  |  ~#@.~  |
+ ~#@.~ | ~.@#~  |  ~</+~  |  ~+\>~  |
+ ~+/~~ | ~~\+~  |  ~.~~~  |  ~~~.~  |
+ 
+ ~~.^. 7 .^.~~  8~+#+ D  +#+~ G
+ ~/@/~ | ~\@\~  |~/@/ |  \@\~ |
+ ~+#+~ | ~+#+~  |.v.~ |  ~.v. |
+  */
+ var in_xcoordDriver = this.boatCoordOnScreenX;
+ var in_ycoordDriver = this.boatCoordOnScreenY;
+ var in_rotation = directionsStatic[this.currentBoatFacing].id;
+ 
+if ((in_xcoordDriver>instGamefield.horizontalFieldSz)||(in_xcoordDriver<0)||
+    (in_ycoordDriver>instGamefield.verticalFieldSz)||(in_ycoordDriver<0)) {
+	   console.log("[Rendering boat]::part of boat seems to be offscreen");
+	   return;
+	}
+var boat_chunk = bigBoatRenderStructure[this.boatId-1][in_rotation].boat_data;
+//render driver's position
+var foundSonarsAtPosition0 = instGameHandler.positionedSonars.filter(
+		            function(item) {
+		                return ((item.xcoord == in_xcoordDriver)&&(item.ycoord == in_ycoordDriver));
+		            }
+		        );
+if (foundSonarsAtPosition0.length>0) {
+    draw_character([in_xcoordDriver, in_ycoordDriver, '@','rgb(255,255,255)','rgb(255,0,0)']);
+} else {
+    draw_character([in_xcoordDriver, in_ycoordDriver, '@','rgb(255,255,255)','rgb(0,0,0)']);
+}
+var currentX_Array = 0; 
+var currentY_Array = 0;
+
+var currentY_GameField = in_ycoordDriver-bigBoatRenderStructure[this.boatId-1][in_rotation].driverY_rel;
+    while (currentY_Array<boat_chunk.length) {
+	    currentX_Array=0;
+		var currentX_GameField = in_xcoordDriver-bigBoatRenderStructure[this.boatId-1][in_rotation].driverX_rel;
+	    while (currentX_Array<boat_chunk[0].length) {
+		    //tilde means water, in layouts.
+		    if (boat_chunk[currentY_Array][currentX_Array]!=='~'){
+			    var foundSonarsAtPosition = instGameHandler.positionedSonars.filter(
+		            function(item) {
+		                return ((item.xcoord == currentX_GameField)&&(item.ycoord == currentY_GameField));
+		            }
+		        );
+				if (foundSonarsAtPosition.length>0) {
+				    draw_character([currentX_GameField,currentY_GameField,boat_chunk[currentY_Array][currentX_Array],'rgb(0,0,0)','rgb(255,0,0)']);
+				} else {
+     		        draw_character([currentX_GameField,currentY_GameField,boat_chunk[currentY_Array][currentX_Array],'rgb(0,0,0)','rgb(255,255,255)']);
+				}
+			} else {
+			    //draw_character([currentX_GameField,currentY_GameField, getRandomItem(instGamefieldRenderer.allowedCharactersList,instGamefieldRenderer.allowedCharactersWeights), getRandomItem(instGamefieldRenderer.allowedColors,instGamefieldRenderer.allowedColorsWeights), 'rgb(0,0,0)']);
+				instGamefieldRenderer.renderWaterOrSonarOrFoundTreasure(currentX_GameField,currentY_GameField);
+			}
+			currentX_GameField++;
+		    currentX_Array++;
+		}
+		currentY_GameField++;
+        currentY_Array++;
+    } 
+}
+
+/** 
+* in_rotationDirection is relative and must be -1 (ccw) or +1 (cw) */
+this.rotateBoat = function(in_rotationDirection) {
+    if (in_rotationDirection==0) {return;}
+    if (in_rotationDirection<0) { //rotate Boat counterclockwise
+	    if (this.currentBoatFacing==0) {this.currentBoatFacing=directionsStatic.length-1;} else {
+		    this.currentBoatFacing -= 1;
+		}
+	} else {
+	    if (this.currentBoatFacing==directionsStatic.length-1) {this.currentBoatFacing = 0;} else {
+		    this.currentBoatFacing += 1;
+		}
+	}
+	this.renderBoat2_ASCII();
+}
+/**
+* forward movement of boat
+* boat position depends on initial rotation. 
+* EAST, WEST, SOUTH, NORTH -> move straight and keep direction
+* NORTHEAST, SOUTHEAST, NORTHWEST, NORTHEAST -> move diagonally and keep direction
+* NORTHEAST_E, SOUTHEAST_E, NORTHWEST_W, SOUTHWEST_W -> move diagonally and change direction to east or west
+* NORTHEAST_N, SOUTHEAST_S, NORTHWEST_N, SOUTHWEST_S -> move diagonally and change direction to north or south
+*/
+this.moveBoat = function() {
+ var in_rotation = directionsStatic[this.currentBoatFacing].id;
+ switch (in_rotation) {
+    case "EAST": {
+	    if (this.boatCoordOnScreenX+2>instGamefield.horizontalFieldSz) {
+		console.log("Movement to EAST cancelled");
+		return;
+		}
+	    //clean up to the left
+		var eastRectangleSz=bigBoatRenderStructure[this.boatId-1]["EAST"].boat_data.length;
+		var closeLeftBorderOnGameFieldX=this.boatCoordOnScreenX-bigBoatRenderStructure[this.boatId-1]["EAST"].driverX_rel;
+		var closeLeftBorderOnGameFieldY=this.boatCoordOnScreenY-bigBoatRenderStructure[this.boatId-1]["EAST"].driverY_rel;
+		for (var i=0; i<eastRectangleSz; i++) {
+		    //draw_character([closeLeftBorderOnGameFieldX,closeLeftBorderOnGameFieldY+i, getRandomItem(instGamefieldRenderer.allowedCharactersList,instGamefieldRenderer.allowedCharactersWeights), getRandomItem(instGamefieldRenderer.allowedColors,instGamefieldRenderer.allowedColorsWeights), 'rgb(0,0,0)']);
+			instGamefieldRenderer.renderWaterOrSonarOrFoundTreasure(closeLeftBorderOnGameFieldX,closeLeftBorderOnGameFieldY+i);
+		}
+		this.boatCoordOnScreenX++;
+		this.renderBoat2_ASCII();
+	    break;
+	}
+	case "WEST": {
+	    if (this.boatCoordOnScreenX-1<0) {
+		console.log("Movement to WEST cancelled");
+		return;
+		}
+		//clean up to the right
+		var westRectangleSz=bigBoatRenderStructure[this.boatId-1]["WEST"].boat_data.length;
+		var farRightBorderOnGameFieldX=this.boatCoordOnScreenX+(bigBoatRenderStructure[this.boatId-1]["WEST"].boat_data[0].length-bigBoatRenderStructure[this.boatId-1]["WEST"].driverX_rel);
+		var closeLeftBorderOnGameFieldY=this.boatCoordOnScreenY-bigBoatRenderStructure[this.boatId-1]["WEST"].driverY_rel;
+		for (var i=0; i<westRectangleSz; i++) {
+		    //draw_character([farRightBorderOnGameFieldX,closeLeftBorderOnGameFieldY+i, getRandomItem(instGamefieldRenderer.allowedCharactersList,instGamefieldRenderer.allowedCharactersWeights), getRandomItem(instGamefieldRenderer.allowedColors,instGamefieldRenderer.allowedColorsWeights), 'rgb(0,0,0)']);
+			instGamefieldRenderer.renderWaterOrSonarOrFoundTreasure(farRightBorderOnGameFieldX,closeLeftBorderOnGameFieldY+i);
+		}
+		this.boatCoordOnScreenX--;
+		this.renderBoat2_ASCII();
+	    break;
+	}
+	case "NORTH": {
+	    
+	    if (this.boatCoordOnScreenY-1<0) {
+		console.log("Movement to NORTH cancelled");
+		return;
+		}
+		//clean up to the bottom
+		var northRectangleSz = bigBoatRenderStructure[this.boatId-1]["NORTH"].boat_data[0].length;
+		var closeLeftBorderOnGameFieldX=this.boatCoordOnScreenX-bigBoatRenderStructure[this.boatId-1]["NORTH"].driverX_rel;
+		var farLeftBorderOnGameFieldY=this.boatCoordOnScreenY+(bigBoatRenderStructure[this.boatId-1]["NORTH"].boat_data.length-bigBoatRenderStructure[this.boatId-1]["NORTH"].driverY_rel)-1;
+		for (var i=0; i<northRectangleSz; i++) {
+		    //draw_character([closeLeftBorderOnGameFieldX+i,farLeftBorderOnGameFieldY, getRandomItem(instGamefieldRenderer.allowedCharactersList,instGamefieldRenderer.allowedCharactersWeights), getRandomItem(instGamefieldRenderer.allowedColors,instGamefieldRenderer.allowedColorsWeights), 'rgb(0,0,0)']);
+			instGamefieldRenderer.renderWaterOrSonarOrFoundTreasure(closeLeftBorderOnGameFieldX+i,farLeftBorderOnGameFieldY);
+		}
+		this.boatCoordOnScreenY--;
+		this.renderBoat2_ASCII();
+        break;
+	}
+	case "SOUTH": {
+	    if (this.boatCoordOnScreenY+2>instGamefield.verticalFieldSz) {
+		    console.log("Movement to SOUTH cancelled");
+			return;
+		}
+		//clean up to top
+		var southRectangleSz = bigBoatRenderStructure[this.boatId-1]["SOUTH"].boat_data[0].length;
+		var closeLeftBorderOnGameFieldX=this.boatCoordOnScreenX-bigBoatRenderStructure[this.boatId-1]["SOUTH"].driverX_rel;
+		var closeLeftBorderOnGameFieldY=this.boatCoordOnScreenY-bigBoatRenderStructure[this.boatId-1]["SOUTH"].driverY_rel;
+		for (var i=0; i<southRectangleSz; i++) {
+		    //draw_character([closeLeftBorderOnGameFieldX+i,closeLeftBorderOnGameFieldY, getRandomItem(instGamefieldRenderer.allowedCharactersList,instGamefieldRenderer.allowedCharactersWeights), getRandomItem(instGamefieldRenderer.allowedColors,instGamefieldRenderer.allowedColorsWeights), 'rgb(0,0,0)']);
+			instGamefieldRenderer.renderWaterOrSonarOrFoundTreasure(closeLeftBorderOnGameFieldX+i,closeLeftBorderOnGameFieldY);
+		}
+		this.boatCoordOnScreenY++;
+		this.renderBoat2_ASCII();
+	    break;
+	}
+	case "NORTHEAST_N":
+	case "NORTHEAST_E":
+	case "NORTHEAST": {
+	    if ((this.boatCoordOnScreenY-1<0)||(this.boatCoordOnScreenX+2>instGamefield.horizontalFieldSz)) {
+		    console.log("movement to NORTHEAST cancelled");
+			return;
+		}
+	    //clean to the bottom and to the left
+		//to the bottom
+		var northeastRectangleSz = bigBoatRenderStructure[this.boatId-1]["NORTHEAST"].boat_data[0].length;
+		var closeLeftBorderOnGameFieldX=this.boatCoordOnScreenX-bigBoatRenderStructure[this.boatId-1]["NORTHEAST"].driverX_rel;
+		var farLeftBorderOnGameFieldY=this.boatCoordOnScreenY+(bigBoatRenderStructure[this.boatId-1]["NORTHEAST"].boat_data.length-bigBoatRenderStructure[this.boatId-1]["NORTHEAST"].driverY_rel)-1;
+		for (var i=0; i<northeastRectangleSz; i++) {
+		    //draw_character([closeLeftBorderOnGameFieldX+i,farLeftBorderOnGameFieldY, getRandomItem(instGamefieldRenderer.allowedCharactersList,instGamefieldRenderer.allowedCharactersWeights), getRandomItem(instGamefieldRenderer.allowedColors,instGamefieldRenderer.allowedColorsWeights), 'rgb(0,0,0)']);
+			instGamefieldRenderer.renderWaterOrSonarOrFoundTreasure(closeLeftBorderOnGameFieldX+i,farLeftBorderOnGameFieldY);
+		}
+		//to the left
+		var northeastRectangleSz1 = bigBoatRenderStructure[this.boatId-1]["NORTHEAST"].boat_data.length;
+		var closeLeftBorderOnGameFieldX1=this.boatCoordOnScreenX-bigBoatRenderStructure[this.boatId-1]["NORTHEAST"].driverX_rel;
+		var closeLeftBorderOnGameFieldY1=this.boatCoordOnScreenY-bigBoatRenderStructure[this.boatId-1]["NORTHEAST"].driverY_rel;
+		for (var i=0; i<northeastRectangleSz1; i++) {
+		    //draw_character([closeLeftBorderOnGameFieldX1,closeLeftBorderOnGameFieldY1+i, getRandomItem(instGamefieldRenderer.allowedCharactersList,instGamefieldRenderer.allowedCharactersWeights), getRandomItem(instGamefieldRenderer.allowedColors,instGamefieldRenderer.allowedColorsWeights), 'rgb(0,0,0)']);
+			instGamefieldRenderer.renderWaterOrSonarOrFoundTreasure(closeLeftBorderOnGameFieldX1,closeLeftBorderOnGameFieldY1+i);
+		}
+		this.boatCoordOnScreenX++;
+		this.boatCoordOnScreenY--;
+		switch (in_rotation) {
+		    case "NORTHEAST_N": {
+			    this.currentBoatFacing = 0;
+			    break;
+			}
+			case "NORTHEAST_E": {
+			    this.currentBoatFacing = 4;
+			    break;
+			}
+			default: {
+			    break;
+			}
+		}
+		this.renderBoat2_ASCII();
+		break;
+	}
+	case "SOUTHEAST_S":
+	case "SOUTHEAST_E":
+	case "SOUTHEAST": {
+	    if ((this.boatCoordOnScreenY+2>instGamefield.verticalFieldSz)||
+		    (this.boatCoordOnScreenX+2>instGamefield.horizontalFieldSz)) {
+		console.log("Movement to SOUTHEAST cancelled");
+		return;
+		}
+		//clean up to the top and to the left
+		//to the left
+		var southeastRectangleSz1 = bigBoatRenderStructure[this.boatId-1]["SOUTHEAST"].boat_data.length;
+		var closeLeftBorderOnGameFieldX1=this.boatCoordOnScreenX-bigBoatRenderStructure[this.boatId-1]["SOUTHEAST"].driverX_rel;
+		var closeLeftBorderOnGameFieldY1=this.boatCoordOnScreenY-bigBoatRenderStructure[this.boatId-1]["SOUTHEAST"].driverY_rel;
+		for (var i=0; i<southeastRectangleSz1; i++) {
+		    //draw_character([closeLeftBorderOnGameFieldX1,closeLeftBorderOnGameFieldY1+i, getRandomItem(instGamefieldRenderer.allowedCharactersList,instGamefieldRenderer.allowedCharactersWeights), getRandomItem(instGamefieldRenderer.allowedColors,instGamefieldRenderer.allowedColorsWeights), 'rgb(0,0,0)']);
+			instGamefieldRenderer.renderWaterOrSonarOrFoundTreasure(closeLeftBorderOnGameFieldX1,closeLeftBorderOnGameFieldY1+i);
+		}
+		//to the top
+		var southeastRectangleSz = bigBoatRenderStructure[this.boatId-1]["SOUTHEAST"].boat_data[0].length;
+		for (var i=0; i<southeastRectangleSz; i++) {
+		    //draw_character([closeLeftBorderOnGameFieldX1+i,closeLeftBorderOnGameFieldY1, getRandomItem(instGamefieldRenderer.allowedCharactersList,instGamefieldRenderer.allowedCharactersWeights), getRandomItem(instGamefieldRenderer.allowedColors,instGamefieldRenderer.allowedColorsWeights), 'rgb(0,0,0)']);
+			instGamefieldRenderer.renderWaterOrSonarOrFoundTreasure(closeLeftBorderOnGameFieldX1+i,closeLeftBorderOnGameFieldY1);
+		}
+		this.boatCoordOnScreenX++;
+		this.boatCoordOnScreenY++;
+		switch(in_rotation) {
+		    case "SOUTHEAST_S": {
+			   this.currentBoatFacing=8;
+			   break;
+			}
+			case "SOUTHEAST_E": {
+			   this.currentBoatFacing=4;
+			   break;
+			}
+		}
+		this.renderBoat2_ASCII();
+	    break;
+	}
+	case "SOUTHWEST_S":
+	case "SOUTHWEST_W":
+	case "SOUTHWEST": {
+	    if ((this.boatCoordOnScreenX-1<0)||(this.boatCoordOnScreenY+2>instGamefield.verticalFieldSz)) {
+		    console.log("Movement to SOUTHWEST cancelled");
+			return;
+		}
+		//clean up to top
+		var southwestRectangleSz = bigBoatRenderStructure[this.boatId-1]["SOUTHWEST"].boat_data[0].length;
+		var closeLeftBorderOnGameFieldX=this.boatCoordOnScreenX-bigBoatRenderStructure[this.boatId-1]["SOUTHWEST"].driverX_rel;
+		var closeLeftBorderOnGameFieldY=this.boatCoordOnScreenY-bigBoatRenderStructure[this.boatId-1]["SOUTHWEST"].driverY_rel;
+		for (var i=0; i<southwestRectangleSz; i++) {
+		    //draw_character([closeLeftBorderOnGameFieldX+i,closeLeftBorderOnGameFieldY, getRandomItem(instGamefieldRenderer.allowedCharactersList,instGamefieldRenderer.allowedCharactersWeights), getRandomItem(instGamefieldRenderer.allowedColors,instGamefieldRenderer.allowedColorsWeights), 'rgb(0,0,0)']);
+			instGamefieldRenderer.renderWaterOrSonarOrFoundTreasure(closeLeftBorderOnGameFieldX+i,closeLeftBorderOnGameFieldY);
+		}
+		//clean up to the west
+		//clean up to the right
+		var southwestRectangleSz1=bigBoatRenderStructure[this.boatId-1]["SOUTHWEST"].boat_data.length;
+		var farRightBorderOnGameFieldX1=this.boatCoordOnScreenX+(bigBoatRenderStructure[this.boatId-1]["SOUTHWEST"].boat_data[0].length-bigBoatRenderStructure[this.boatId-1]["SOUTHWEST"].driverX_rel)+1;
+		var closeLeftBorderOnGameFieldY1=this.boatCoordOnScreenY-bigBoatRenderStructure[this.boatId-1]["SOUTHWEST"].driverY_rel;
+		for (var i=0; i<southwestRectangleSz1; i++) {
+		    //draw_character([farRightBorderOnGameFieldX1,closeLeftBorderOnGameFieldY1+i, getRandomItem(instGamefieldRenderer.allowedCharactersList,instGamefieldRenderer.allowedCharactersWeights), getRandomItem(instGamefieldRenderer.allowedColors,instGamefieldRenderer.allowedColorsWeights), 'rgb(0,0,0)']);
+			instGamefieldRenderer.renderWaterOrSonarOrFoundTreasure(farRightBorderOnGameFieldX1,closeLeftBorderOnGameFieldY1+i);
+		}
+		this.boatCoordOnScreenX--;
+		this.boatCoordOnScreenY++;
+		switch (in_rotation) {
+		     case "SOUTHWEST_S": {
+			    this.currentBoatFacing=8;
+				break;
+			 }
+			 case "SOUTHWEST_W": {
+			    this.currentBoatFacing=12;
+			    break;
+			 }
+			 default: {
+			    break;
+			 }
+		}
+		this.renderBoat2_ASCII();
+		break;
+	}
+	case "NORTHWEST_N":
+	case "NORTHWEST_W":
+	case "NORTHWEST": {
+	    if ((this.boatCoordOnScreenY-1<0)||(this.boatCoordOnScreenX-1<0)) {
+		    console.log("Movement to NORTHWEST cancelled");
+			return;
+		}
+		//clean to the bottom and to the right
+		//clean to the bottom
+		var northwestRectangleSz = bigBoatRenderStructure[this.boatId-1]["NORTHWEST"].boat_data[0].length;
+		var closeLeftBorderOnGameFieldX=this.boatCoordOnScreenX-bigBoatRenderStructure[this.boatId-1]["NORTHWEST"].driverX_rel;
+		var farLeftBorderOnGameFieldY=this.boatCoordOnScreenY+(bigBoatRenderStructure[this.boatId-1]["NORTHWEST"].boat_data.length-bigBoatRenderStructure[this.boatId-1]["NORTHWEST"].driverY_rel)-1;
+		for (var i=0; i<northwestRectangleSz; i++) {
+		    //draw_character([closeLeftBorderOnGameFieldX+i,farLeftBorderOnGameFieldY, getRandomItem(instGamefieldRenderer.allowedCharactersList,instGamefieldRenderer.allowedCharactersWeights), getRandomItem(instGamefieldRenderer.allowedColors,instGamefieldRenderer.allowedColorsWeights), 'rgb(0,0,0)']);
+			instGamefieldRenderer.renderWaterOrSonarOrFoundTreasure(closeLeftBorderOnGameFieldX+i,farLeftBorderOnGameFieldY);
+		}
+		//clean to the right
+		var northwestRectangleSz1=bigBoatRenderStructure[this.boatId-1]["NORTHWEST"].boat_data.length;
+		var farRightBorderOnGameFieldX1=this.boatCoordOnScreenX+(bigBoatRenderStructure[this.boatId-1]["NORTHWEST"].boat_data[0].length-bigBoatRenderStructure[this.boatId-1]["EAST"].driverX_rel);
+		var closeLeftBorderOnGameFieldY1=this.boatCoordOnScreenY-bigBoatRenderStructure[this.boatId-1]["NORTHWEST"].driverY_rel;
+		for (var i=0; i<northwestRectangleSz1; i++) {
+		    //draw_character([farRightBorderOnGameFieldX1,closeLeftBorderOnGameFieldY1+i, getRandomItem(instGamefieldRenderer.allowedCharactersList,instGamefieldRenderer.allowedCharactersWeights), getRandomItem(instGamefieldRenderer.allowedColors,instGamefieldRenderer.allowedColorsWeights), 'rgb(0,0,0)']);
+			instGamefieldRenderer.renderWaterOrSonarOrFoundTreasure(farRightBorderOnGameFieldX1,closeLeftBorderOnGameFieldY1+i);
+		}
+		this.boatCoordOnScreenX--;
+		this.boatCoordOnScreenY--;
+		switch (in_rotation) {
+		     case "NORTHWEST_N": {
+			    this.currentBoatFacing=0;
+				break;
+			 }
+			 case "NORTHWEST_W": {
+			    this.currentBoatFacing=12;
+			    break;
+			 }
+			 default: {
+			    break;
+			 }
+		}
+		this.renderBoat2_ASCII();
+	    break;
+	}
+	default: {
+	    console.log("movement not implemented");
+	}
+ }
+ 
+}
+
+}
+/**
+* check render capabilities of canvas
+*/
+function testrender() {
+    instGamefield.canvasCtx.fillStyle = 'rgb(200,0,0)';
+    instGamefield.canvasCtx.fillRect(30,30,50,40);
+    console.log("rendering now");
+    draw_character([1, 1, '\u2248', 'rgb(0,128,255)', 'rgb(0,0,0)']);
+    draw_character([2, 1, '=', 'rgb(0,128,255)', 'rgb(0,0,0)']);
+    draw_character([3, 1, '\u223C', 'rgb(0,128,255)', 'rgb(0,0,0)']);
+    draw_character([4, 1, '~', 'rgb(0,128,255)', 'rgb(0,0,0)']);
+	draw_character([5, 1, '-', 'rgb(0,128,255)', 'rgb(0,0,0)']);
+	draw_character([1, 2, '\u2248', 'rgb(0,153,255)', 'rgb(0,0,0)']);
+    draw_character([2, 2, '=', 'rgb(0,153,255)', 'rgb(0,0,0)']);
+    draw_character([3, 2, '\u223C', 'rgb(0,153,255)', 'rgb(0,0,0)']);
+    draw_character([4, 2, '~', 'rgb(0,153,255)', 'rgb(0,0,0)']);
+	draw_character([5, 2, '-', 'rgb(0,153,255)', 'rgb(0,0,0)']);
+	draw_character([1, 3, '\u2248', 'rgb(0,0,255)', 'rgb(0,0,0)']);
+    draw_character([2, 3, '=', 'rgb(0,0,255)', 'rgb(0,0,0)']);
+    draw_character([3, 3, '\u223C', 'rgb(0,0,255)', 'rgb(0,0,0)']);
+    draw_character([4, 3, '~', 'rgb(0,0,255)', 'rgb(0,0,0)']);
+	draw_character([5, 3, ',', 'rgb(0,0,255)', 'rgb(0,0,0)']);		
+   var coord=0;
+   for (var i='A'.charCodeAt(0); i<'z'.charCodeAt(0); i++) {
+       console.log([i,coord]);
+       if (coord>=80) {
+	     console.log("done");
+	      break;
+	   } else {
+	      draw_character([coord,0,String.fromCharCode(i),'rgb(0,0,255)', 'rgb(255,255,255)']);
+		  coord++;
+	   }
+   }
+   console.log(gamefieldCache);
+}
+
+/**
+* initialize gamefield and start event processing in it.
+*/
+function main_init() {
+ instGamefield = new GamefieldParameters(80,25,15);
+ instGamefieldRenderer = new GamefieldRenderer();
+ instBoat = new Boat();
+ instGamefield.canvasItm = document.getElementById("gamefield");
+ instGamefield.canvasCtx = instGamefield.canvasItm.getContext('2d');
+ instGamefield.canvasCtx.font = ""+gamefieldFontWeight+" "+instGamefield.fontSz+"px "+gamefieldFontName;
+ instGamefield.symbolWidth = Math.ceil(instGamefield.canvasCtx.measureText("W").width);
+ 
+ instGamefield.canvasItm.width = instGamefield.horizontalFieldSz* instGamefield.symbolWidth;
+ instGamefield.canvasItm.height = instGamefield.verticalFieldSz* instGamefield.fontSz;
+ instGameHandler = new GameHandler(MAXSONARS, MAXTREASURES);
+ var itmInfodiv = document.getElementById("infodiv");
+ itmInfodiv.style.width = instGamefield.canvasItm.width;
+ itmInfodiv.style.fontFamily = gamefieldFontName;
+ itmInfodiv.style.fontWeight = gamefieldFontWeight;
+ itmInfodiv.style.fontSize = instGamefield.fontSz;
+ itmInfodiv.style.paddingLeft = "1px"; itmInfodiv.style.paddingRight = "1px";
+ itmInfodiv.style.letterSpacing="2px";
+ itmInfodiv.innerHTML= "You have <span id=\"infodiv_totalsonars\">"+parseInt(instGameHandler.numAvailableSonars)+"</span> sonar device<span id=\"infodiv_neatplural\">s</span> left<br/><span id=\"infodiv_secondline\"> </span>";
+ 
+ var itmInfodiv2 = document.getElementById("infodiv_instructions_header");
+ itmInfodiv2.style.width = instGamefield.canvasItm.width;
+ itmInfodiv2.style.fontFamily = gamefieldFontName;
+ itmInfodiv2.style.fontWeight = gamefieldFontWeight;
+ itmInfodiv2.style.fontSize = instGamefield.fontSz;
+ itmInfodiv2.style.paddingLeft = "1px"; itmInfodiv2.style.paddingRight = "1px";
+ itmInfodiv2.style.letterSpacing="2px"; itmInfodiv2.style.cursor="pointer";
+  var itmInfodiv3 = document.getElementById("infodiv_instructions_text");
+ itmInfodiv3.style.width = instGamefield.canvasItm.width;
+ itmInfodiv3.style.fontFamily = gamefieldFontName;
+ itmInfodiv3.style.fontWeight = gamefieldFontWeight;
+ itmInfodiv3.style.fontSize = instGamefield.fontSz;
+ itmInfodiv3.style.paddingLeft = "1px"; itmInfodiv3.style.paddingRight = "1px";
+ itmInfodiv3.style.letterSpacing="2px";
+ 
+ //testrender();
+ instGamefieldRenderer.renderGamefieldComplete();
+ instBoat.renderBoat2_ASCII();
+ 
+}
+//one cannot simply process key events from canvas. tabindex is required, so the canvas gains focus
+//A, S, D - rotate boat
+//W - move boat forward, in the current direction
+//Z - drop sonar device in the current position
+var keyHandler = function(e) {
+    //console.log("Handler!");
+	//document.getElementById("infodiv").innerHTML+="+";
+	//https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent
+	//https://developer.mozilla.org/ru/docs/Web/API/KeyboardEvent/key/Key_Values
+	var foundKey = e.code;
+	if (instGameHandler.currentGameState =="MAINGAME_HIDEMESSAGE") {
+	document.getElementById("infodiv_secondline").innerHTML = "&nbsp;";
+	instGameHandler.currentGameState = "MAINGAME";
+	}
+	switch (foundKey) {
+	    case "s":
+		case "KeyS":
+	    case "Down":
+	    case "ArrowDown": {
+		    console.log("going backward");
+		    break;
+		}
+		case "a":
+		case "KeyA":
+		case "Left":
+		case "ArrowLeft": {
+		    if (instGameHandler.currentGameState == "MAINGAME") {
+			    console.log("rotating counterclockwise");
+			    instBoat.rotateBoat(-1);
+			}
+		    
+		    break;
+		}
+		case "d":
+		case "KeyD":
+		case "Right":
+		case "ArrowRight": {
+		    if (instGameHandler.currentGameState == "MAINGAME") {
+		        console.log("rotating clockwise");
+			     instBoat.rotateBoat(+1);
+			}
+		    break;
+		}
+		case "w":
+		case "KeyW":
+		case "Up":
+		case "ArrowUp": {
+		    if (instGameHandler.currentGameState == "MAINGAME") {
+		        console.log("going forward");
+			    instBoat.moveBoat();
+			}
+		    break;
+		}
+		case "Z":
+		case "KeyZ":
+		case "z": {
+		    instGameHandler.numAvailableSonars-=1;
+		    instGameHandler.placeSonar(instBoat.boatCoordOnScreenX, instBoat.boatCoordOnScreenY);
+			if ((instGameHandler.numAvailableSonars==0)&&(instGameHandler.positionedTreasures.length!=0)) {
+			     var allTreasuresLine = "";
+				 instGameHandler.positionedTreasures.forEach(function(elem){
+				    if (allTreasuresLine.length>1){allTreasuresLine+=", ";}
+				    allTreasuresLine+="["+elem.xcoord+";"+elem.ycoord+"]";} );
+			     document.getElementById("infodiv_secondline").innerHTML = instGameHandler.missedTreasuresMessage+"<br/>"+instGameHandler.restartMessage+"<br/>Remaining treasures were:<br/>"+allTreasuresLine;
+				 instGameHandler.currentGameState = "SONARS_USED";
+			} else {
+			    if (instGameHandler.positionedTreasures.length == 0) {
+				    instGameHandler.currentGameState = "TREASURES_FOUND";
+				    document.getElementById("infodiv_secondline").innerHTML = instGameHandler.successMessage+"<br/>"+instGameHandler.restartMessage;
+				}
+			}
+			break;
+		}
+		case "Y":
+		case "KeyY":
+		case "y": {
+		    if ((instGameHandler.currentGameState == "SONARS_USED") || (instGameHandler.currentGameState == "TREASURES_FOUND")) {
+		     instGameHandler.currentGameState = "MAINGAME";
+			 main_init();
+			 }
+		}
+		
+	    default: {
+		   break;
+		}
+	}
+    //console.log(e);
+ }
+ 
+ function showOrHideInstructions() {
+    var x = document.getElementById("infodiv_instructions_text");
+    if (x.style.display === "none") {
+        x.style.display = "block";
+    } else {
+        x.style.display = "none";
+    }
+}
+ 
+</script>
+</head>
+<body style="background-color: black; color: white;" onload="main_init();" >
+
+<canvas id="gamefield" style="border:solid red 1px" onkeydown="keyHandler(event);" tabindex="1">Here be S O N A R</canvas>
+
+<div id="infodiv">BANG</div>
+<div id="infodiv_instructions_header" onclick="showOrHideInstructions()">[Instructions]</div>
+<div id="infodiv_instructions_text" style="display:none">
+You are the captain of the Simon, a treasure-hunting ship. Your current mission<br/>
+is to find the three sunken treasure chests that are lurking in the part of the<br/>
+ocean you are in and collect them.<br/>
+Use [A] and [D] to steer ship, [W] to move it.<br/>
+To play, press [Z] to drop a sonar device in the current position of boat. The<br/>
+sonar can find out how far away the closest chest is to it.<br/>
+For example, the d below marks where the device was dropped, and the 2's <br/>
+represent distances of 2 away from the device. The 4's represent distances of 4<br/> 
+<br/>
+444444444<br/>
+4_______4<br/>
+4_22222_4<br/>
+4_2___2_4<br/>
+4_2_d_2_4<br/>
+4_2___2_4<br/>
+4_22222_4<br/>
+4_______4<br/>
+444444444<br/>
+<br/>
+For example, here is a treasure chest (the c) located a distance of 2 away<br/>
+from the sonar device (the d):<br/>
+22222<br/>
+2___2<br/>
+2_d_2<br/>
+2___2<br/>
+22222<br/>
+The point where the device was dropped will be marked with a d.<br/>
+The treasure chests don't move around. Sonar devices can detect treasure <br/> 
+up to a distance of 9. If all chests are out of range, the point will be marked<br/> 
+with O. If a device is directly dropped on a treasure , you have discovered<br/>
+the location of the chest, and it will be collected. The sonar device will <br/>
+remain there. When you collect a chest, all sonar devices will update to locate<br/>
+ the next closest sunken treasure chest.<br/>
+</div>
+</body>
+</html>
